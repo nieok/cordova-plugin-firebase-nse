@@ -10,35 +10,28 @@ class NotificationService: UNNotificationServiceExtension {
         withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
     ) {
         self.contentHandler = contentHandler
-        self.bestAttemptContent = (request.content.mutableCopy() as? UNMutableNotificationContent)
+        bestAttemptContent = (request.content.mutableCopy() as? UNMutableNotificationContent)
 
         guard let bestAttemptContent = bestAttemptContent else {
             contentHandler(request.content)
             return
         }
 
-        // Firebase Console image support
-        var imageURLString: String?
+        // 🔹 Firebase Console sends image via "image" or "imageUrl"
+        let userInfo = bestAttemptContent.userInfo
 
-        if let fcmOptions = bestAttemptContent.userInfo["fcm_options"] as? [AnyHashable: Any] {
-            imageURLString = fcmOptions["image"] as? String
-        }
+        if let imageUrlString =
+            userInfo["image"] as? String ??
+            userInfo["imageUrl"] as? String,
+           let imageUrl = URL(string: imageUrlString) {
 
-        if imageURLString == nil,
-           let notification = bestAttemptContent.userInfo["notification"] as? [AnyHashable: Any] {
-            imageURLString = notification["image"] as? String
-        }
-
-        guard let imageURL = imageURLString,
-              let url = URL(string: imageURL) else {
-            contentHandler(bestAttemptContent)
-            return
-        }
-
-        downloadImage(from: url) { attachment in
-            if let attachment = attachment {
-                bestAttemptContent.attachments = [attachment]
+            downloadImage(from: imageUrl) { attachment in
+                if let attachment = attachment {
+                    bestAttemptContent.attachments = [attachment]
+                }
+                contentHandler(bestAttemptContent)
             }
+        } else {
             contentHandler(bestAttemptContent)
         }
     }
@@ -50,22 +43,17 @@ class NotificationService: UNNotificationServiceExtension {
         }
     }
 
-    private func downloadImage(
-        from url: URL,
-        completion: @escaping (UNNotificationAttachment?) -> Void
-    ) {
-        let task = URLSession.shared.downloadTask(with: url) { tempURL, _, _ in
-            guard let tempURL = tempURL else {
+    private func downloadImage(from url: URL, completion: @escaping (UNNotificationAttachment?) -> Void) {
+        let task = URLSession.shared.downloadTask(with: url) { location, _, _ in
+            guard let location = location else {
                 completion(nil)
                 return
             }
 
-            let fileManager = FileManager.default
             let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
             let fileURL = tmpDir.appendingPathComponent(url.lastPathComponent)
 
-            try? fileManager.removeItem(at: fileURL)
-            try? fileManager.moveItem(at: tempURL, to: fileURL)
+            try? FileManager.default.moveItem(at: location, to: fileURL)
 
             let attachment = try? UNNotificationAttachment(
                 identifier: "image",
@@ -75,7 +63,6 @@ class NotificationService: UNNotificationServiceExtension {
 
             completion(attachment)
         }
-
         task.resume()
     }
 }

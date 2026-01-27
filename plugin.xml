@@ -1,38 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<plugin
-  id="cordova-plugin-firebase-nse"
-  version="1.0.0"
-  xmlns="http://apache.org/cordova/ns/plugins/1.0"
-  xmlns:ios="http://apache.org/cordova/ns/plugins/ios">
+<plugin id="cordova-plugin-firebase-nse"
+        version="1.0.0"
+        xmlns="http://apache.org/cordova/ns/plugins/1.0">
 
-  <name>Firebase NSE</name>
+  <name>Firebase Notification Service Extension</name>
 
   <platform name="ios">
 
-    <!-- Register the extension target -->
     <ios-extension
-      name="NotificationService"
-      type="app-extension"
-      bundleIdSuffix="NotificationService">
+        name="NotificationService"
+        type="app-extension">
 
       <config-file target="NotificationService/Info.plist" parent="NSExtension">
         <dict>
           <key>NSExtensionPointIdentifier</key>
           <string>com.apple.usernotifications.service</string>
           <key>NSExtensionPrincipalClass</key>
-          <string>NotificationService</string>
+          <string>$(PRODUCT_MODULE_NAME).NotificationService</string>
         </dict>
       </config-file>
 
-      <!-- Swift source -->
       <resource-file
-        src="src/ios/NotificationService.swift"
-        target="NotificationService/NotificationService.swift" />
+          src="src/ios/NotificationService/NotificationService.swift"
+          target="NotificationService/NotificationService.swift" />
 
-      <!-- Info.plist -->
       <resource-file
-        src="src/ios/Info.plist"
-        target="NotificationService/Info.plist" />
+          src="src/ios/NotificationService/Info.plist"
+          target="NotificationService/Info.plist" />
 
     </ios-extension>
 
