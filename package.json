@@ -1,0 +1,9 @@
+{
+  "name": "cordova-plugin-firebase-nse",
+  "version": "1.0.0",
+  "description": "Firebase Notification Service Extension for Cordova",
+  "cordova": {
+    "id": "cordova-plugin-firebase-nse",
+    "platforms": ["ios"]
+  }
+}
