@@ -2,16 +2,18 @@
 <plugin
   id="cordova-plugin-firebase-nse"
   version="1.0.0"
-  xmlns="http://apache.org/cordova/ns/plugins/1.0">
+  xmlns="http://apache.org/cordova/ns/plugins/1.0"
+  xmlns:ios="http://apache.org/cordova/ns/plugins/ios">
 
-  <name>Firebase Notification Service Extension</name>
+  <name>Firebase NSE</name>
 
   <platform name="ios">
 
-    <!-- Create the Notification Service Extension target -->
+    <!-- Register the extension target -->
     <ios-extension
       name="NotificationService"
-      type="app-extension">
+      type="app-extension"
+      bundleIdSuffix="NotificationService">
 
       <config-file target="NotificationService/Info.plist" parent="NSExtension">
         <dict>
