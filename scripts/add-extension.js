@@ -3,12 +3,20 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function(context) {
-    const BUNDLE_ID = 'com.lukasbbq.app.NotificationService'; // <--- UPDATE THIS TO MATCH YOUR APP
+    const BUNDLE_ID = 'com.lukasbbq.app.NotificationService'; // <--- VERIFY THIS MATCHES YOUR APP
     const TARGET_NAME = 'NotificationService';
 
     const projectRoot = context.opts.projectRoot;
     const platformRoot = path.join(projectRoot, 'platforms', 'ios');
-    const pluginDir = context.opts.plugin.dir;
+
+    // Robust Plugin Directory Finding
+    // Sometimes context.opts.plugin is missing in hooks, so we fallback to manual path
+    let pluginDir = context.opts.plugin ? context.opts.plugin.dir : undefined;
+    if (!pluginDir || typeof pluginDir !== 'string') {
+        pluginDir = path.join(projectRoot, 'local-plugins', 'cordova-plugin-firebase-nse');
+    }
+
+    console.log(`[NSE Plugin] using plugin directory: ${pluginDir}`);
 
     const projectFiles = fs.readdirSync(platformRoot).filter(file => file.endsWith('.xcodeproj'));
     if (projectFiles.length === 0) return;
@@ -25,16 +33,20 @@ module.exports = function(context) {
             return;
         }
 
-        // 1. Safety Check: If target exists, stop immediately to prevent "Duplicate Output" errors
         if (myProj.pbxTargetByName(TARGET_NAME)) {
-            console.log('[NSE Plugin] Target already exists. Skipping script to prevent duplicates.');
+            console.log('[NSE Plugin] Target already exists. Skipping.');
             return;
         }
 
         console.log('[NSE Plugin] Creating Notification Service Extension...');
 
-        // 2. Create the Target
+        // 1. Create the Target
         const target = myProj.addTarget(TARGET_NAME, 'app_extension', TARGET_NAME, BUNDLE_ID);
+
+        // 2. CRITICAL FIX: Get the Product File Reference correctly
+        // node-xcode returns { uuid: ..., pbxNativeTarget: ... }
+        // The actual .appex file reference is inside pbxNativeTarget.productReference
+        const productFileRef = target.pbxNativeTarget.productReference;
 
         // 3. Create Group and Copy Files
         const destFolder = path.join(platformRoot, TARGET_NAME);
@@ -45,6 +57,11 @@ module.exports = function(context) {
         const sourceSwift = path.join(pluginDir, 'src', 'ios', 'NotificationService.swift');
         const sourcePlist = path.join(pluginDir, 'src', 'ios', 'Info.plist');
         
+        // Safety check for source files
+        if (!fs.existsSync(sourceSwift) || !fs.existsSync(sourcePlist)) {
+             throw new Error(`[NSE Plugin] Source files missing at ${sourceSwift} or ${sourcePlist}`);
+        }
+
         fs.copyFileSync(sourceSwift, path.join(destFolder, 'NotificationService.swift'));
         fs.copyFileSync(sourcePlist, path.join(destFolder, 'Info.plist'));
 
@@ -59,24 +76,18 @@ module.exports = function(context) {
 
         // 5. Add Build Phase (Compile Swift)
         myProj.addSourceFile('NotificationService.swift', { target: target.uuid }, group);
-        
-        // IMPORTANT: Do NOT add Info.plist to "Copy Bundle Resources". 
-        // It is referenced automatically by the target settings. Adding it causes "Duplicate output file".
 
-        // 6. EMBED Extension into Main App (The Critical Link)
-        // Find the Main App Target
+        // 6. EMBED Extension into Main App
         const mainTarget = myProj.getFirstTarget().firstTarget;
-        
         console.log(`[NSE Plugin] Embedding extension into main target: ${mainTarget.productName}`);
 
-        // Create a Copy Files phase for "Embed App Extensions" (Destination: 13)
-        // We add the ProductFile (NotificationService.appex) to this phase
+        // Use the 'productFileRef' we extracted earlier
         myProj.addBuildPhase(
-            [target.productReference], 
+            [productFileRef], 
             'PBXCopyFilesBuildPhase', 
             'Embed App Extensions', 
             mainTarget.uuid, 
-            { dstSubfolderSpec: 13 } // 13 = Plugins/Extensions folder
+            { dstSubfolderSpec: 13 } 
         );
 
         // 7. Save
