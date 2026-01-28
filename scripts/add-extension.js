@@ -3,33 +3,31 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function(context) {
-    const BUNDLE_ID = 'com.weevi.lukasbbq.NotificationService'; // <--- CHANGE THIS
+    const BUNDLE_ID = 'com.lukasbbq.app.NotificationService'; // <--- UPDATE THIS TO MATCH YOUR APP
     const TARGET_NAME = 'NotificationService';
 
     const projectRoot = context.opts.projectRoot;
     const platformRoot = path.join(projectRoot, 'platforms', 'ios');
     const pluginDir = context.opts.plugin.dir;
 
-    // 1. Find the .xcodeproj file
     const projectFiles = fs.readdirSync(platformRoot).filter(file => file.endsWith('.xcodeproj'));
     if (projectFiles.length === 0) return;
     
     const projectName = projectFiles[0].replace('.xcodeproj', '');
     const projectPath = path.join(platformRoot, projectFiles[0], 'project.pbxproj');
 
-    console.log(`[NSE Plugin] Found iOS project: ${projectName}`);
-
+    console.log(`[NSE Plugin] Opening project: ${projectName}`);
     const myProj = xcode.project(projectPath);
 
     myProj.parse(function (err) {
         if (err) {
-            console.error('[NSE Plugin] Error parsing iOS project:', err);
+            console.error('[NSE Plugin] Error parsing project:', err);
             return;
         }
 
-        // Check if target already exists to avoid duplicates
+        // 1. Safety Check: If target exists, stop immediately to prevent "Duplicate Output" errors
         if (myProj.pbxTargetByName(TARGET_NAME)) {
-            console.log('[NSE Plugin] Target already exists. Skipping.');
+            console.log('[NSE Plugin] Target already exists. Skipping script to prevent duplicates.');
             return;
         }
 
@@ -38,41 +36,51 @@ module.exports = function(context) {
         // 2. Create the Target
         const target = myProj.addTarget(TARGET_NAME, 'app_extension', TARGET_NAME, BUNDLE_ID);
 
-        // 3. Create Destination Folder in platforms/ios/NotificationService
+        // 3. Create Group and Copy Files
         const destFolder = path.join(platformRoot, TARGET_NAME);
         if (!fs.existsSync(destFolder)) {
             fs.mkdirSync(destFolder);
         }
 
-        // 4. Copy Files from Plugin to Platform
-        // We look for files in: /local-plugins/cordova-plugin-firebase-nse/src/ios/
         const sourceSwift = path.join(pluginDir, 'src', 'ios', 'NotificationService.swift');
         const sourcePlist = path.join(pluginDir, 'src', 'ios', 'Info.plist');
         
-        const destSwift = path.join(destFolder, 'NotificationService.swift');
-        const destPlist = path.join(destFolder, 'Info.plist');
+        fs.copyFileSync(sourceSwift, path.join(destFolder, 'NotificationService.swift'));
+        fs.copyFileSync(sourcePlist, path.join(destFolder, 'Info.plist'));
 
-        console.log('[NSE Plugin] Copying source files...');
-        fs.copyFileSync(sourceSwift, destSwift);
-        fs.copyFileSync(sourcePlist, destPlist);
-
-        // 5. Add Files to Xcode Project
-        // Create a group (folder representation in Xcode)
+        // 4. Add Files to Project
         const group = myProj.addPbxGroup(
             ['NotificationService.swift', 'Info.plist'],
             TARGET_NAME,
             TARGET_NAME
         );
-
-        // Link the group to the main project
         const mainGroup = myProj.getFirstProject().firstProject.mainGroup;
         myProj.addToPbxGroup(group.uuid, mainGroup);
 
-        // 6. Add Build Phase (Compile Swift file)
+        // 5. Add Build Phase (Compile Swift)
         myProj.addSourceFile('NotificationService.swift', { target: target.uuid }, group);
+        
+        // IMPORTANT: Do NOT add Info.plist to "Copy Bundle Resources". 
+        // It is referenced automatically by the target settings. Adding it causes "Duplicate output file".
 
-        // 7. Save Changes
+        // 6. EMBED Extension into Main App (The Critical Link)
+        // Find the Main App Target
+        const mainTarget = myProj.getFirstTarget().firstTarget;
+        
+        console.log(`[NSE Plugin] Embedding extension into main target: ${mainTarget.productName}`);
+
+        // Create a Copy Files phase for "Embed App Extensions" (Destination: 13)
+        // We add the ProductFile (NotificationService.appex) to this phase
+        myProj.addBuildPhase(
+            [target.productReference], 
+            'PBXCopyFilesBuildPhase', 
+            'Embed App Extensions', 
+            mainTarget.uuid, 
+            { dstSubfolderSpec: 13 } // 13 = Plugins/Extensions folder
+        );
+
+        // 7. Save
         fs.writeFileSync(projectPath, myProj.writeSync());
-        console.log('[NSE Plugin] Successfully injected Notification Service Extension!');
+        console.log('[NSE Plugin] Done. Project saved.');
     });
 };
