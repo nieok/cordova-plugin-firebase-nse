@@ -6,11 +6,14 @@ module.exports = function(context) {
     const APP_BUNDLE_ID = 'com.weevi.lukasbbq'; 
     const EXT_BUNDLE_ID = 'com.weevi.lukasbbq.NotificationService'; 
     const TARGET_NAME = 'NotificationService';
+    
+    // FROM YOUR LOGS
+    const TEAM_ID = '4R5NFLM5RY'; 
 
     const projectRoot = context.opts.projectRoot;
     const platformRoot = path.join(projectRoot, 'platforms', 'ios');
 
-    // 1. Find Plugin Directory
+    // Find Plugin Directory
     let pluginDir = context.opts.plugin ? context.opts.plugin.dir : undefined;
     if (!pluginDir || typeof pluginDir !== 'string') {
         pluginDir = path.join(projectRoot, 'local-plugins', 'cordova-plugin-firebase-nse');
@@ -26,17 +29,19 @@ module.exports = function(context) {
     myProj.parse(function (err) {
         if (err) return;
 
-        // Prevent duplicates
+        // 1. DUPLICATE CHECK (Prevent "Multiple commands produce" error)
         if (myProj.pbxTargetByName(TARGET_NAME)) {
-            console.log('[NSE Plugin] Target already exists. Skipping.');
+            console.log('[NSE Plugin] Target already exists. Skipping to prevent duplicates.');
             return;
         }
 
-        // 2. Create the Extension Target
+        console.log('[NSE Plugin] Creating Notification Service Extension...');
+
+        // 2. Create Target
         const target = myProj.addTarget(TARGET_NAME, 'app_extension', TARGET_NAME, EXT_BUNDLE_ID);
         const productFileRef = target.pbxNativeTarget.productReference;
 
-        // 3. Create Group and Copy Files
+        // 3. Create Group & Copy Files
         const destFolder = path.join(platformRoot, TARGET_NAME);
         if (!fs.existsSync(destFolder)) fs.mkdirSync(destFolder);
 
@@ -46,42 +51,42 @@ module.exports = function(context) {
         fs.copyFileSync(sourceSwift, path.join(destFolder, 'NotificationService.swift'));
         fs.copyFileSync(sourcePlist, path.join(destFolder, 'Info.plist'));
 
-        // 4. Add Files to Project Group
-        const group = myProj.addPbxGroup(
-            ['NotificationService.swift', 'Info.plist'],
-            TARGET_NAME,
-            TARGET_NAME
-        );
+        const group = myProj.addPbxGroup(['NotificationService.swift', 'Info.plist'], TARGET_NAME, TARGET_NAME);
         const mainGroup = myProj.getFirstProject().firstProject.mainGroup;
         myProj.addToPbxGroup(group.uuid, mainGroup);
 
-        // 5. Add NotificationService.swift to "Compile Sources"
+        // 4. Add to Compile Sources
         myProj.addSourceFile('NotificationService.swift', { target: target.uuid }, group);
 
-        // 6. CRITICAL: Set Build Settings (Info.plist, Bundle ID, Signing)
-        // We iterate over all configurations (Debug, Release) for the new target
+        // 5. CRITICAL: Inject Build Settings (Team ID & Profile)
+        // We configure this DIRECTLY in the project file to satisfy Xcode's initial checks
         const configurations = myProj.pbxXCBuildConfigurationSection();
         for (const key in configurations) {
             const config = configurations[key];
             if (typeof config === 'object' && config.buildSettings) {
-                // Only modify the configs belonging to our new TARGET
-                // (node-xcode doesn't make this easy, so we check if the config name is standard)
-                // A safer way in node-xcode is using `updateBuildProperty` but that applies to everything.
-                // We will use the specific API `addTargetAttribute` style logic below.
+                // Apply to the EXTENSION Target
+                // node-xcode makes mapping configs to targets hard, so we apply to any config 
+                // that matches our new target's product name.
+                if (config.buildSettings['PRODUCT_NAME'] === TARGET_NAME || config.buildSettings['PRODUCT_NAME'] === `"${TARGET_NAME}"`) {
+                    console.log(`[NSE Plugin] Updating build settings for config: ${config.name}`);
+                    
+                    config.buildSettings['INFOPLIST_FILE'] = `${TARGET_NAME}/Info.plist`;
+                    config.buildSettings['PRODUCT_BUNDLE_IDENTIFIER'] = EXT_BUNDLE_ID;
+                    config.buildSettings['DEVELOPMENT_TEAM'] = TEAM_ID; // <--- FIXES SIGNING ERROR
+                    config.buildSettings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0';
+                    config.buildSettings['TARGETED_DEVICE_FAMILY'] = '"1,2"';
+                    config.buildSettings['SKIP_INSTALL'] = 'YES';
+                    config.buildSettings['SWIFT_VERSION'] = '5.0';
+                    // We don't set PROVISIONING_PROFILE here because build.json handles the UUID mapping
+                    // But Team ID is required early.
+                }
             }
         }
 
-        // Simpler way: Use myProj.addBuildProperty to set it for the TARGET
-        // "NotificationService" is the target name
-        myProj.addBuildProperty('INFOPLIST_FILE', `${TARGET_NAME}/Info.plist`, TARGET_NAME);
-        myProj.addBuildProperty('PRODUCT_BUNDLE_IDENTIFIER', EXT_BUNDLE_ID, TARGET_NAME);
-        myProj.addBuildProperty('IPHONEOS_DEPLOYMENT_TARGET', '13.0', TARGET_NAME);
-        myProj.addBuildProperty('TARGETED_DEVICE_FAMILY', '"1,2"', TARGET_NAME);
-        myProj.addBuildProperty('SKIP_INSTALL', 'YES', TARGET_NAME);
-        myProj.addBuildProperty('SWIFT_VERSION', '5.0', TARGET_NAME);
-
-        // 7. Embed Extension into Main App
+        // 6. Embed in Main App
         const mainTarget = myProj.getFirstTarget().firstTarget;
+        console.log(`[NSE Plugin] Embedding into main app: ${mainTarget.productName}`);
+        
         myProj.addBuildPhase(
             [productFileRef], 
             'PBXCopyFilesBuildPhase', 
